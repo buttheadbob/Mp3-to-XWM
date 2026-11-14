@@ -98,31 +98,47 @@ static int ensure_dir(const char *path, const char *label)
     return 1;
 }
 
-/* Shows the quality choice and waits for S or Q. Returns the chosen rate, or 0 to quit. */
-static int ask_start(void)
+/* Shows the format and quality choice and waits for S or Q. Returns false to quit. */
+static bool ask_start(convert_options *opt)
 {
     int choice = 0;
-    printf("\nQuality for stereo files (mono files always use 48 kbit/s):\n");
-    printf("  1 = 48 kbit/s, the game's own music (default)\n");
-    printf("  2 = 96 kbit/s\n");
-    printf("  3 = 192 kbit/s\n");
+    opt->format = FORMAT_XWM;
+    printf("\nOutput format:\n");
+    printf("  X = XWM (default): small files, best for music. A sound set to loop has a short gap\n");
+    printf("      (about 0.08 s) at its end, because the format always decodes whole frames.\n");
+    printf("  A = MS ADPCM: loops without a gap (not yet tried in game), best for looping sounds and\n");
+    printf("      effects. Files are about 7-8 times larger than 48 kbit/s XWM. The game uses it for\n");
+    printf("      its own loops. Sounds longer than %d minutes are converted but not fitted as loops.\n",
+           CONVERT_LOOP_SECONDS / 60);
+    printf("XWM quality for stereo files (mono files always use 48 kbit/s):\n");
+    printf("  1 = 48 kbit/s, the game's own music (default), 2 = 96 kbit/s, 3 = 192 kbit/s\n");
     for (;;) {
-        printf("Quality: %d kbit/s. Press 1, 2 or 3 to change it, S to start or Q to quit.\n",
-               CONVERT_RATES[choice]);
+        if (opt->format == FORMAT_XWM)
+            printf("Format: XWM, %d kbit/s. ", CONVERT_RATES[choice]);
+        else
+            printf("Format: MS ADPCM. ");
+        printf("Press X or A for the format, 1, 2 or 3 for the XWM quality, S to start or Q to quit.\n");
         fflush(stdout);
         int c;
         do
             c = plat_read_key();
-        while (c >= 0 && (c == 0 || !strchr("123sSqQ", c)));
+        while (c >= 0 && (c == 0 || !strchr("123xXaAsSqQ", c)));
         if (c < 0 || c == 'q' || c == 'Q')
-            return 0;
-        if (c == 's' || c == 'S')
-            return CONVERT_RATES[choice];
-        choice = c - '1';
+            return false;
+        if (c == 's' || c == 'S') {
+            opt->kbps = CONVERT_RATES[choice];
+            return true;
+        }
+        if (c == 'x' || c == 'X')
+            opt->format = FORMAT_XWM;
+        else if (c == 'a' || c == 'A')
+            opt->format = FORMAT_ADPCM;
+        else
+            choice = c - '1';
     }
 }
 
-static int convert_all(const char *in_dir, const char *out_dir, int kbps)
+static int convert_all(const char *in_dir, const char *out_dir, const convert_options *opt)
 {
     name_list list = {0};
     int rc = 1;
@@ -155,7 +171,6 @@ static int convert_all(const char *in_dir, const char *out_dir, int kbps)
         }
         char in_path[PATH_MAX_LEN], out_path[PATH_MAX_LEN], out_name[PATH_MAX_LEN];
         char err[256] = "";
-        int used = 0;
         snprintf(out_name, sizeof out_name, "%.*s.xwm", (int)(strlen(name) - 4), name);
         printf("[%d/%d] %s -> %s ... ", i + 1, list.count, name, out_name);
         fflush(stdout);
@@ -163,8 +178,21 @@ static int convert_all(const char *in_dir, const char *out_dir, int kbps)
             printf("failed: path too long\n");
             continue;
         }
-        if (convert_mp3_to_xwm(in_path, out_path, kbps, &used, err, sizeof err) == 0) {
-            printf("done (%d kbit/s)\n", used);
+        convert_result res;
+        if (convert_mp3(in_path, out_path, opt, &res, err, sizeof err) == 0) {
+            if (opt->format == FORMAT_XWM)
+                printf("done (XWM %d kbit/s)\n", res.kbps);
+            else if (res.loop_streamed)
+                printf("done (MS ADPCM; longer than %d minutes, so it was not fitted as a loop: %ld samples of"
+                       " silence end it and it will not loop seamlessly)\n", CONVERT_LOOP_SECONDS / 60,
+                       res.loop_change);
+            else if (res.loop_padded)
+                printf("done (MS ADPCM; too short to fit, so %ld samples of silence end it and it will not loop"
+                       " seamlessly)\n", res.loop_change);
+            else
+                printf("done (MS ADPCM, loops without a gap (not yet tried in game); length fitted by %+ld"
+                       " samples, played at %d Hz so pitch and speed are unchanged)\n",
+                       res.loop_change, res.loop_rate);
             ok++;
         } else {
             printf("failed: %s\n", err);
@@ -221,12 +249,12 @@ static int run(void)
         printf("MP3 files in the %s folder will be converted into the %s folder.\n", IN_DIR, OUT_DIR);
     }
 
-    int kbps = ask_start();
-    if (!kbps) {
+    convert_options opt;
+    if (!ask_start(&opt)) {
         printf("Quit.\n");
         return 0;
     }
-    return convert_all(in_dir, out_dir, kbps);
+    return convert_all(in_dir, out_dir, &opt);
 }
 
 int main(void)

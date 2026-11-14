@@ -3,14 +3,16 @@
  * so any out-of-bounds access stops the run:
  *   clang -std=c23 -g -O1 -fsanitize=address -Isrc -o build/test_fuzz tests/test_fuzz.c
  *         src/mp3dec.c src/mp3_input.c src/resample.c src/wma_enc.c src/mdct.c src/bitwriter.c
- *         src/xwm_writer.c src/platform.c src/convert.c
+ *         src/xwm_writer.c src/platform.c src/convert.c src/adpcm_enc.c src/loopfit.c src/wav_writer.c
  * Each test passes when the code returns without a memory error and its checks hold. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "../src/adpcm_enc.h"
 #include "../src/convert.h"
+#include "../src/loopfit.h"
 #include "../src/mp3_tables.h"
 #include "../src/mp3dec.h"
 #include "../src/wma_enc.h"
@@ -184,9 +186,18 @@ static void test_huge_samples(const char *dir)
 
     for (int kbps = 48; kbps <= 192; kbps *= 2) {
         char err[256] = "";
-        int used = 0;
-        int rc = convert_mp3_to_xwm(in_path, out_path, kbps, &used, err, sizeof err);
-        snprintf(what, sizeof what, "huge samples convert at %d kbit/s (%s)", kbps, rc ? err : "written");
+        convert_options opt = {FORMAT_XWM, kbps};
+        convert_result res;
+        int rc = convert_mp3(in_path, out_path, &opt, &res, err, sizeof err);
+        snprintf(what, sizeof what, "huge samples convert to XWM at %d kbit/s (%s)", kbps, rc ? err : "written");
+        check(rc == 0, what);
+    }
+    {
+        char err[256] = "";
+        convert_options opt = {FORMAT_ADPCM, 48};
+        convert_result res;
+        int rc = convert_mp3(in_path, out_path, &opt, &res, err, sizeof err);
+        snprintf(what, sizeof what, "huge samples convert to MS ADPCM (%s)", rc ? err : "written");
         check(rc == 0, what);
     }
     remove(in_path);
@@ -225,6 +236,69 @@ static void test_encoder_bad_floats(void)
     }
     free(a);
     free(b);
+}
+
+/* The ADPCM encoder and the length fit take NaN, infinities and huge values, in pieces of any
+ * size, and always give whole blocks; sounds past the hold limit (20000 samples here) stream. */
+typedef struct {
+    loopfit       *fit;
+    adpcm_encoder *enc;
+    int            blocks;
+    size_t         bytes;
+} adpcm_chain;
+
+static int count_blocks(const uint8_t *p, size_t n, void *ctx)
+{
+    (void)p;
+    adpcm_chain *c = ctx;
+    c->blocks++;
+    c->bytes += n;
+    return 0;
+}
+
+static int fit_to_enc(const float *const *pcm, size_t n, void *ctx)
+{
+    return adpcm_encoder_feed(((adpcm_chain *)ctx)->enc, pcm, n);
+}
+
+static void test_adpcm_bad_floats(void)
+{
+    for (int channels = 1; channels <= 2; channels++)
+        for (size_t total = 1; total < 300000; total = total * 7 + 13) {
+            float *a = malloc(total * sizeof(float)), *b = malloc(total * sizeof(float));
+            for (size_t i = 0; i < total; i++) {
+                uint32_t r = next_rand() % 8;
+                a[i] = r == 0 ? NAN : r == 1 ? INFINITY : r == 2 ? -INFINITY : r == 3 ? 1e30f
+                     : r == 4 ? -1e30f : (float)((int)(next_rand() % 65536) - 32768) / 16384.0f;
+                b[i] = -a[i];
+            }
+            adpcm_chain c = {0};
+            c.enc = adpcm_encoder_create(channels, count_blocks, &c);
+            c.fit = loopfit_create(channels, 44100, 44100, ADPCM_BLOCK_SAMPLES, 20000, fit_to_enc, &c);
+            bool ok = c.enc && c.fit;
+            for (size_t i = 0; ok && i < total;) {
+                size_t n = 1 + next_rand() % 5000;
+                if (n > total - i)
+                    n = total - i;
+                const float *p[2] = {a + i, b + i};
+                ok = loopfit_feed(c.fit, p, n) == 0;
+                i += n;
+            }
+            loopfit_result fit = {0};
+            ok = ok && loopfit_finish(c.fit, &fit) == 0 && adpcm_encoder_finish(c.enc) == 0;
+            size_t samples = total + (size_t)fit.change;
+            char what[400];
+            snprintf(what, sizeof what, "ADPCM %d ch, %zu samples of NaN/inf/1e30/noise: %d whole blocks%s, %d Hz",
+                     channels, total, c.blocks, fit.streamed ? " (streamed)" : fit.padded ? " (padded)" : "",
+                     fit.rate);
+            check(ok && samples % ADPCM_BLOCK_SAMPLES == 0 && (size_t)c.blocks * ADPCM_BLOCK_SAMPLES == samples
+                      && c.bytes == (size_t)c.blocks * (size_t)adpcm_block_align(channels),
+                  what);
+            loopfit_free(c.fit);
+            adpcm_encoder_free(c.enc);
+            free(a);
+            free(b);
+        }
 }
 
 /* Random data with frame headers of every layer, version and rate sprinkled in. */
@@ -300,6 +374,7 @@ int main(int argc, char **argv)
     test_oversized_free_format();
     test_huge_samples(dir);
     test_encoder_bad_floats();
+    test_adpcm_bad_floats();
     test_random_streams();
     test_random_frames();
     printf("%s\n", failures ? "FAILED" : "all passed");

@@ -69,19 +69,29 @@ bool plat_interactive(void)
     return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) != 0;
 }
 
-/* UTF-8 path to UTF-16. Absolute paths get the \\?\ prefix so they may exceed MAX_PATH. */
+/* UTF-8 path to UTF-16. Absolute paths get the \\?\ prefix so they may exceed MAX_PATH. With that
+ * prefix Windows takes the path literally, so it is made full first: / becomes \ and . and ..
+ * are resolved. */
 static bool to_wide_path(const char *s, wchar_t *out, int count)
 {
-    int off = 0;
-    if (((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')) && s[1] == ':' && s[2] == '\\') {
-        wcscpy(out, L"\\\\?\\");
-        off = 4;
-    } else if (s[0] == '\\' && s[1] == '\\' && s[2] != '?') {
-        wcscpy(out, L"\\\\?\\UNC");
-        off = 7;
-        s += 1;  /* keep one backslash: \\?\UNC\server\share */
-    }
-    return MultiByteToWideChar(CP_UTF8, 0, s, -1, out + off, count - off) > 0;
+    bool drive = ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')) && s[1] == ':'
+              && (s[2] == '\\' || s[2] == '/');
+    bool unc = (s[0] == '\\' || s[0] == '/') && (s[1] == '\\' || s[1] == '/') && s[2] != '?' && s[2] != '.';
+    if (!drive && !unc)
+        return MultiByteToWideChar(CP_UTF8, 0, s, -1, out, count) > 0;
+    static thread_local wchar_t raw[PATH_MAX_LEN], full[PATH_MAX_LEN];
+    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, raw, PATH_MAX_LEN) <= 0)
+        return false;
+    DWORD n = GetFullPathNameW(raw, PATH_MAX_LEN, full, nullptr);
+    if (n == 0 || n >= PATH_MAX_LEN)
+        return false;
+    const wchar_t *prefix = unc ? L"\\\\?\\UNC" : L"\\\\?\\";
+    const wchar_t *rest = unc ? full + 1 : full;  /* keep one backslash: \\?\UNC\server\share */
+    if (wcslen(prefix) + wcslen(rest) + 1 > (size_t)count)
+        return false;
+    wcscpy(out, prefix);
+    wcscat(out, rest);
+    return true;
 }
 
 static bool to_utf8(const wchar_t *s, char *out, int size)

@@ -43,17 +43,38 @@ clang -std=c23 -O2 -D_CRT_SECURE_NO_WARNINGS -o build\synth_encode.exe tests\syn
   generated impulse, noise or sine, plus the raw source next to it. It feeds the encoder `piece`
   samples at a time (default 777) to exercise the streaming paths.
 
+## MS ADPCM
+
+- `acm_decode in.xwm out.wav` (Windows) decodes an MS ADPCM file with Windows' own MS ADPCM codec
+  through the Audio Compression Manager, offline, and checks that it gives exactly 512 samples per
+  block and that every sample matches the reference decoder in the test with the prediction rounded
+  down (an arithmetic shift, as the encoder predicts). It prints the count for rounding toward zero
+  too: on the game's own ArcBlockRafineryLoop2d.xwm Windows differs from that in 588733 samples and
+  from rounding down in none. Build: `clang -std=c23 -O2 -D_CRT_SECURE_NO_WARNINGS -o build\acm_decode.exe tests\acm_decode.c -lmsacm32 -lwinmm`.
+- `loop_check.c` builds 10 s loops of a tone and of noise, from 44.1 kHz and from 48 kHz sources,
+  whose length is not a whole number of blocks. It sends them through the loop fit (whole-loop
+  resampling to whole blocks) and the ADPCM encoder, decodes them again with its own MS ADPCM
+  decoder, and checks that the length is whole blocks, that the loop point is as clean as the
+  middle of the loop, and that the header rate plays the samples in the source's own time (pitch
+  within 0.1 cent). `loop_check out_dir`:
+
+```
+clang -std=c23 -O2 -o build/loop_check tests/loop_check.c src/adpcm_enc.c src/loopfit.c src/wav_writer.c src/platform.c src/resample.c
+```
+
 ## Hostile input
 
 `test_fuzz.c` feeds the decoder and the conversion path input built to break them: free format frames
 far over the legal size with the largest bit reservoir offset, a layer III frame whose largest gain and
 linbits give samples far out of range, NaN and infinite samples straight into the encoder, random data
 with frame headers sprinkled in, and streams of well formed headers with random contents for every
-version, layer, rate and channel mode. Build it with AddressSanitizer so any out-of-bounds access stops
+version, layer, rate and channel mode, plus NaN, infinite and huge samples in pieces of every size
+through the ADPCM length fit and encoder, which must always give whole blocks, held or (past a
+small hold limit) streamed. Build it with AddressSanitizer so any out-of-bounds access stops
 the run:
 
 ```
-clang -std=c23 -g -O1 -fsanitize=address -D_CRT_SECURE_NO_WARNINGS -Isrc -o build/test_fuzz tests/test_fuzz.c src/mp3dec.c src/mp3_input.c src/resample.c src/wma_enc.c src/mdct.c src/bitwriter.c src/xwm_writer.c src/platform.c src/convert.c
+clang -std=c23 -g -O1 -fsanitize=address -D_CRT_SECURE_NO_WARNINGS -Isrc -o build/test_fuzz tests/test_fuzz.c src/mp3dec.c src/mp3_input.c src/resample.c src/wma_enc.c src/mdct.c src/bitwriter.c src/xwm_writer.c src/platform.c src/convert.c src/adpcm_enc.c src/loopfit.c src/wav_writer.c
 build/test_fuzz <scratch folder>
 ```
 
