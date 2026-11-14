@@ -1,0 +1,14 @@
+build/
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+*.xwm
+*.mp3
+*.wav
+*.raw
+*.part
+ToConvert/
+Output/
+in-game-test.md
