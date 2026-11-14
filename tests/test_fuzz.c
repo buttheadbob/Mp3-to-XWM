@@ -184,17 +184,17 @@ static void test_huge_samples(const char *dir)
     (void)decode_all;
     (void)sane;
 
-    for (int kbps = 48; kbps <= 192; kbps *= 2) {
+    {
         char err[256] = "";
-        convert_options opt = {FORMAT_XWM, kbps};
+        convert_options opt = {FORMAT_XWM};
         convert_result res;
         int rc = convert_mp3(in_path, out_path, &opt, &res, err, sizeof err);
-        snprintf(what, sizeof what, "huge samples convert to XWM at %d kbit/s (%s)", kbps, rc ? err : "written");
+        snprintf(what, sizeof what, "huge samples convert to XWM (%s)", rc ? err : "written");
         check(rc == 0, what);
     }
     {
         char err[256] = "";
-        convert_options opt = {FORMAT_ADPCM, 48};
+        convert_options opt = {FORMAT_ADPCM};
         convert_result res;
         int rc = convert_mp3(in_path, out_path, &opt, &res, err, sizeof err);
         snprintf(what, sizeof what, "huge samples convert to MS ADPCM (%s)", rc ? err : "written");

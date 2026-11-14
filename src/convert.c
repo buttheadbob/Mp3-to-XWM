@@ -15,13 +15,9 @@
 static constexpr int    OUT_RATE = 44100;
 static constexpr size_t CHUNK    = 4096;  /* samples per channel read at a time */
 
-/* Packet size for each bit rate at 44.1 kHz: the bytes of 16384 samples (8 frames of 2048),
- * rounded up. 2230 is what the game's own music uses; 4459 and 8917 are the matching sizes
- * in XAudio2's list of xWMA block alignments. */
-static int block_align_for(int kbps)
-{
-    return kbps == 192 ? 8917 : kbps == 96 ? 4459 : 2230;
-}
+/* Packet size at 48 kbit/s and 44.1 kHz: the bytes of 16384 samples (8 frames of 2048), rounded
+ * up, as in the game's own music. */
+static constexpr int XWM_BLOCK_ALIGN = 2230;
 
 typedef struct {
     wma_encoder   *wma;
@@ -57,14 +53,10 @@ static int pump(mp3_reader *in, resampler *rs, float *buf[2], char *err, int err
     }
 }
 
-static int convert_xwm(mp3_reader *in, const char *out_path, int kbps, convert_result *res, float *buf[2],
-                       char *err, int err_size)
+static int convert_xwm(mp3_reader *in, const char *out_path, float *buf[2], char *err, int err_size)
 {
     int channels = mp3_reader_channels(in);
-    /* xWMA encoders give mono 44.1 kHz no rate above 48 kbit/s; decoders treat such files as 48. */
-    if (channels == 1)
-        kbps = 48;
-    wma_params p = {OUT_RATE, channels, kbps * 1000, block_align_for(kbps)};
+    wma_params p = {OUT_RATE, channels, CONVERT_XWM_KBPS * 1000, XWM_BLOCK_ALIGN};
     int rc = -1;
     xwm_writer *out = xwm_open(out_path, err, err_size);
     pipe_ctx ctx = {.err = err, .err_size = err_size};
@@ -81,8 +73,6 @@ static int convert_xwm(mp3_reader *in, const char *out_path, int kbps, convert_r
     const uint32_t *dpds = wma_encoder_dpds(ctx.wma, &count);
     rc = xwm_close(out, &p, dpds, count, err, err_size);
     out = nullptr;  /* closed, whatever the result */
-    if (rc == 0)
-        res->kbps = kbps;
 done:
     if (out)
         xwm_abort(out);
@@ -155,7 +145,7 @@ int convert_mp3(const char *in_path, const char *out_path, const convert_options
     else if (opt->format == FORMAT_ADPCM)
         rc = convert_adpcm(in, out_path, res, buf, err, err_size);
     else
-        rc = convert_xwm(in, out_path, opt->kbps, res, buf, err, err_size);
+        rc = convert_xwm(in, out_path, buf, err, err_size);
     mp3_reader_close(in);
     free(buf[0]);
     free(buf[1]);
