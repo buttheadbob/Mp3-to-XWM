@@ -4,6 +4,17 @@ Converts MP3 files into the `.xwm` sound files Space Engineers plays for music a
 
 A single console program with no external libraries. Its MP3 decoder and its WMA and ADPCM encoders are part of the program.
 
+Version 1.0.0. Source: https://github.com/buttheadbob/Mp3-to-XWM
+
+## Download
+
+Releases are on the repository's Releases page:
+
+- `mp3toxwm-1.0.0-windows-x64.zip`: `mp3toxwm.exe` for 64-bit Windows 10 and 11.
+- `mp3toxwm-1.0.0-linux-x64.tar.gz`: `mp3toxwm` for 64-bit Linux, statically linked.
+
+Each comes with a `.sha256` file holding its SHA-256 checksum. Both packages also hold this README, LICENSE and THIRD_PARTY.md.
+
 ## Use
 
 1. Run `mp3toxwm` (`mp3toxwm.exe` on Windows).
@@ -67,6 +78,8 @@ sh build.sh
 ```
 
 The program is written to `build/`.
+
+`release.bat` (Windows) and `release.sh` (Linux) build the program and pack the release files above into `release/`, named after the version in `src/version.h`.
 
 ## Tests
 

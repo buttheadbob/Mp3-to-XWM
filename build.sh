@@ -27,5 +27,6 @@ if [ -z "$STD" ]; then
 fi
 
 mkdir -p build
-"$CC_BIN" -std=$STD -O2 -Wall -Wextra -o build/mp3toxwm src/*.c -lm
+# CFLAGS and LDFLAGS from the environment are added (release.sh links with -static).
+"$CC_BIN" -std=$STD -O2 -Wall -Wextra ${CFLAGS:-} -o build/mp3toxwm src/*.c -lm ${LDFLAGS:-}
 echo "Built build/mp3toxwm"

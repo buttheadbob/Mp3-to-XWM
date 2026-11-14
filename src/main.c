@@ -7,6 +7,7 @@
 
 #include "convert.h"
 #include "platform.h"
+#include "version.h"
 
 static constexpr char IN_DIR[]  = "ToConvert";
 static constexpr char OUT_DIR[] = "Output";
@@ -220,7 +221,8 @@ static int run(void)
         return 1;
     }
 
-    printf("Mp3 to XWM - converts MP3 files to Space Engineers .xwm audio\n\n");
+    printf("Mp3 to XWM " MP3TOXWM_VERSION " - converts MP3 files to Space Engineers .xwm audio\n");
+    printf("Source: " MP3TOXWM_SOURCE "\n\n");
 
     int made_in = ensure_dir(in_dir, IN_DIR);
     int made_out = ensure_dir(out_dir, OUT_DIR);

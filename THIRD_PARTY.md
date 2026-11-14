@@ -1,5 +1,8 @@
 # Third party material
 
+Mp3 to XWM (https://github.com/buttheadbob/Mp3-to-XWM) is licensed under the GNU AGPL version 3 or later; see LICENSE.
+It contains the material below from other projects.
+
 All of it comes from FFmpeg (https://ffmpeg.org), commit `c02ac4a9e071d5cfbea82318fa8d9f6cb55b353e`, which is licensed
 under the GNU Lesser General Public License version 2.1 or later
 (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
