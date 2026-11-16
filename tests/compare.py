@@ -22,6 +22,9 @@ def read(path):
 def main():
     ref, rr = read(sys.argv[1])
     out, ro = read(sys.argv[2])
+    if out.shape[1] == 1 and ref.shape[1] > 1:
+        # the program mixes stereo down to mono the same way
+        ref = ref.mean(axis=1, keepdims=True)
     if rr != ro or ref.shape[1] != out.shape[1]:
         print(f"format mismatch: {rr} Hz x{ref.shape[1]} vs {ro} Hz x{out.shape[1]}")
         return 1

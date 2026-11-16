@@ -24,10 +24,10 @@ struct mp3_reader {
     bool        id3v1;        /* the file ends with a 128 byte ID3v1 tag */
     mp3_decoder dec;
     float       frame[MP3_MAX_SAMPLES * 2];
-    int         rate, channels;
+    int         rate;         /* 0 until the first audio frame */
     size_t      head_skip;    /* samples still to drop at the start (gapless) */
     size_t      tail;         /* samples to drop at the end (gapless) */
-    float      *fifo[2];      /* decoded samples held back until more than `tail` are waiting */
+    float      *fifo;         /* decoded samples held back until more than `tail` are waiting */
     size_t      fifo_cap, fifo_start, fifo_count;
     bool        done;
 };
@@ -81,8 +81,7 @@ static inline float clean(float v)
     return v > 1.0f ? 1.0f : v < -1.0f ? -1.0f : v;
 }
 
-/* Adds a frame of in_ch interleaved channels to the FIFO, converted to the stream's channel
- * count (mono frames are doubled, stereo frames are mixed down). */
+/* Adds a frame of in_ch interleaved channels to the FIFO as mono (stereo frames are mixed down). */
 static bool fifo_push(mp3_reader *r, const float *pcm, int n, int in_ch, size_t skip)
 {
     for (size_t i = skip; i < (size_t)n; i++) {
@@ -90,14 +89,7 @@ static bool fifo_push(mp3_reader *r, const float *pcm, int n, int in_ch, size_t 
             return false;
         size_t at = (r->fifo_start + r->fifo_count) % r->fifo_cap;
         const float *s = pcm + i * (size_t)in_ch;
-        if (r->channels == in_ch) {
-            for (int ch = 0; ch < in_ch; ch++)
-                r->fifo[ch][at] = clean(s[ch]);
-        } else if (r->channels == 2) {
-            r->fifo[0][at] = r->fifo[1][at] = clean(s[0]);
-        } else {
-            r->fifo[0][at] = clean(0.5f * (s[0] + s[1]));
-        }
+        r->fifo[at] = clean(in_ch == 2 ? 0.5f * (s[0] + s[1]) : s[0]);
         r->fifo_count++;
     }
     return true;
@@ -134,9 +126,8 @@ static int decode_next(mp3_reader *r, char *err, int err_size)
         }
         if (n == 0)
             continue;
-        if (r->channels == 0) {
+        if (r->rate == 0) {
             r->rate = info.sample_rate;
-            r->channels = info.channels;
         } else if (info.sample_rate != r->rate) {
             snprintf(err, (size_t)err_size, "sample rate changes inside the file");
             return -1;
@@ -159,10 +150,9 @@ mp3_reader *mp3_reader_open(const char *path, char *err, int err_size)
         return nullptr;
     }
     r->fifo_cap = (size_t)MAX_PADDING + MP3_MAX_SAMPLES + 1;
-    r->fifo[0] = malloc(r->fifo_cap * sizeof(float));
-    r->fifo[1] = malloc(r->fifo_cap * sizeof(float));
+    r->fifo = malloc(r->fifo_cap * sizeof(float));
     r->f = plat_fopen(path, "rb");
-    if (!r->fifo[0] || !r->fifo[1] || !r->f) {
+    if (!r->fifo || !r->f) {
         snprintf(err, (size_t)err_size, r->f ? "out of memory" : "cannot read file");
         mp3_reader_close(r);
         return nullptr;
@@ -174,9 +164,9 @@ mp3_reader *mp3_reader_open(const char *path, char *err, int err_size)
     skip_id3v2(r);
     /* decode until the first audio, which sets the format */
     int got;
-    while ((got = decode_next(r, err, err_size)) > 0 && r->channels == 0)
+    while ((got = decode_next(r, err, err_size)) > 0 && r->rate == 0)
         ;
-    if (got < 0 || r->channels == 0) {
+    if (got < 0 || r->rate == 0) {
         if (got >= 0)
             snprintf(err, (size_t)err_size, "no MPEG audio found");
         mp3_reader_close(r);
@@ -190,12 +180,7 @@ int mp3_reader_sample_rate(const mp3_reader *r)
     return r->rate;
 }
 
-int mp3_reader_channels(const mp3_reader *r)
-{
-    return r->channels;
-}
-
-long mp3_reader_read(mp3_reader *r, float *const out[2], size_t max, char *err, int err_size)
+long mp3_reader_read(mp3_reader *r, float *out, size_t max, char *err, int err_size)
 {
     size_t produced = 0;
     while (produced < max) {
@@ -203,11 +188,8 @@ long mp3_reader_read(mp3_reader *r, float *const out[2], size_t max, char *err, 
         size_t ready = r->fifo_count > r->tail ? r->fifo_count - r->tail : 0;
         if (ready) {
             size_t take = ready < max - produced ? ready : max - produced;
-            for (size_t i = 0; i < take; i++) {
-                size_t at = (r->fifo_start + i) % r->fifo_cap;
-                for (int ch = 0; ch < r->channels; ch++)
-                    out[ch][produced + i] = r->fifo[ch][at];
-            }
+            for (size_t i = 0; i < take; i++)
+                out[produced + i] = r->fifo[(r->fifo_start + i) % r->fifo_cap];
             r->fifo_start = (r->fifo_start + take) % r->fifo_cap;
             r->fifo_count -= take;
             produced += take;
@@ -230,7 +212,6 @@ void mp3_reader_close(mp3_reader *r)
         return;
     if (r->f)
         fclose(r->f);
-    free(r->fifo[0]);
-    free(r->fifo[1]);
+    free(r->fifo);
     free(r);
 }

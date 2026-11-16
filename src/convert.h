@@ -5,7 +5,7 @@
 
 typedef enum {
     FORMAT_XWM,    /* WMA 2 in xWMA: small; a loop has a short gap at its end */
-    FORMAT_ADPCM,  /* MS ADPCM: loops without a gap; about 7-8 times larger than 48 kbit/s xWMA */
+    FORMAT_ADPCM,  /* MS ADPCM: loops without a gap; about 4 times larger than 48 kbit/s xWMA */
 } output_format;
 
 /* xWMA output: 48 kbit/s with 2230 byte packets, the format of the game's own music. Stereo
@@ -13,7 +13,7 @@ typedef enum {
 static constexpr int CONVERT_XWM_KBPS = 48;
 
 /* ADPCM sounds up to this long are held and fitted as loops; longer ones are converted as they
- * come (holding 10 minutes of 48 kHz stereo takes about 230 MB). */
+ * come (holding 10 minutes of 48 kHz audio takes about 115 MB). */
 static constexpr int CONVERT_LOOP_SECONDS = 600;
 
 typedef struct {

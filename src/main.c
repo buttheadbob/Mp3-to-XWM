@@ -108,7 +108,7 @@ static bool ask_start(convert_options *opt)
     printf("      A sound set to loop has a short gap (about 0.08 s) at its end, because the format\n");
     printf("      always decodes whole frames.\n");
     printf("  A = MS ADPCM: loops without a gap, best for looping sounds and effects. Files are about\n");
-    printf("      7-8 times larger than XWM. The game uses it for its own loops. Sounds longer than\n");
+    printf("      4 times larger than XWM. The game uses it for its own loops. Sounds longer than\n");
     printf("      %d minutes are converted but not fitted as loops.\n", CONVERT_LOOP_SECONDS / 60);
     for (;;) {
         if (opt->format == FORMAT_XWM)

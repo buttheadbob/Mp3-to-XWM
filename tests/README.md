@@ -16,8 +16,9 @@ apt-get install ffmpeg gcc gcc-14 clang-19 libc6-dev python3 python3-numpy
   console program, decodes the results with ffmpeg and checks them with `compare.py`.
 - `synth_check.sh` encodes generated signals straight to `.xwm` (no MP3 step) at mono 48 kbit/s and
   stereo 48, 96 and 192 kbit/s, and reports gain and SNR after decoding with ffmpeg. The program
-  writes 48 kbit/s only; the other rates check the encoder itself.
-- `compare.py` aligns two WAV files, then reports delay, gain, SNR and segmental SNR.
+  writes mono 48 kbit/s only; stereo and the other rates check the encoder itself.
+- `compare.py` aligns two WAV files, then reports delay, gain, SNR and segmental SNR. A stereo
+  reference against a mono result is mixed down to the mean of left and right, as the program does.
 
 ffmpeg drops one more frame (2048 samples) of codec delay at the start than Microsoft's decoder,
 so its output is 2048 samples early. The scripts allow for this.
