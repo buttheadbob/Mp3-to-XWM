@@ -472,15 +472,11 @@ static void write_frame(const wma_ctx *s, const frame_state *f, bool reset, int 
             write_coefs(s, f, c, g, bw);
 }
 
-/* Encodes one frame into bw within [min_bits, max_bits]. */
-static int encode_frame(const wma_ctx *s, frame_state *f, bool reset, int min_bits, int max_bits, bitwriter *bw)
+/* Quantizes the frame to code in [min_bits, max_bits] bits. Returns the bits and sets *gain,
+ * or returns -1. */
+static int fit_frame(const wma_ctx *s, frame_state *f, bool reset, int min_bits, int max_bits, int *gain)
 {
     int ch = s->p.channels;
-
-    for (int c = 0; c < ch; c++) {
-        f->coded[c] = true;
-        choose_exponents(s, f, c);
-    }
 
     /* Smallest gain (finest quantization) whose frame fits in max_bits. */
     int lo = 1, hi = 400, best = -1;
@@ -514,8 +510,28 @@ static int encode_frame(const wma_ctx *s, frame_state *f, bool reset, int min_bi
     }
     if (bits < min_bits || bits > max_bits)
         return -1;
+    *gain = best;
+    return bits;
+}
+
+/* Encodes one frame into bw within [min_bits, max_bits], in any length but `avoid` bits. */
+static int encode_frame(const wma_ctx *s, frame_state *f, bool reset, int min_bits, int max_bits, int avoid,
+                        bitwriter *bw)
+{
+    for (int c = 0; c < s->p.channels; c++) {
+        f->coded[c] = true;
+        choose_exponents(s, f, c);
+    }
+    int g = 0, bits = fit_frame(s, f, reset, min_bits, max_bits, &g);
+    if (bits == avoid) {
+        bits = avoid > min_bits ? fit_frame(s, f, reset, min_bits, avoid - 1, &g) : -1;
+        if (bits < 0)
+            bits = fit_frame(s, f, reset, avoid + 1, max_bits, &g);
+    }
+    if (bits < 0)
+        return -1;
     size_t start = bw->bits;
-    write_frame(s, f, reset, best, bw);
+    write_frame(s, f, reset, g, bw);
     return (int)(bw->bits - start);
 }
 
@@ -649,8 +665,13 @@ static int encode_next_frame(wma_encoder *e, char *err, int err_size)
     if (allowed < s->frame_min + 64)  /* room for padding to overshoot by one value */
         allowed = s->frame_min + 64;
 
+    /* A frame never ends exactly at the end of a packet. The next packet would then start a new
+     * frame at bit offset 0, and Microsoft's decoder (the one the game uses) decodes one frame more
+     * than that packet holds, which delays the rest of the sound by a frame. */
+    int to_packet_end = (int)((uint64_t)(packet + 1) * (uint64_t)s->packet_bits - start);
+
     analyse(e, e->next_frame);
-    int bits = encode_frame(s, &e->f, reset, s->frame_min, (int)allowed, &e->stream);
+    int bits = encode_frame(s, &e->f, reset, s->frame_min, (int)allowed, to_packet_end, &e->stream);
     if (bits < 0 || e->stream.failed) {
         snprintf(err, (size_t)err_size, "could not fit frame %lld in the bit budget", (long long)e->next_frame);
         return -1;
